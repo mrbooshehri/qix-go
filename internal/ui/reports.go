@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/mrbooshehri/qix-go/internal/models"
 )
 
@@ -219,21 +220,21 @@ func PrintKPIReport(project *models.Project) {
 			pct := float64(count) / float64(active) * 100
 			table.ColoredRow(
 				[]string{"High", fmt.Sprintf("%d", count), FormatPercentage(pct)},
-				[]color.Color{*Red, *Red, *Red},
+				[]*color.Color{Red, Red, Red},
 			)
 		}
 		if count := priorityCounts[models.PriorityMedium]; count > 0 {
 			pct := float64(count) / float64(active) * 100
 			table.ColoredRow(
 				[]string{"Medium", fmt.Sprintf("%d", count), FormatPercentage(pct)},
-				[]color.Color{*Yellow, *Yellow, *Yellow},
+				[]*color.Color{Yellow, Yellow, Yellow},
 			)
 		}
 		if count := priorityCounts[models.PriorityLow]; count > 0 {
 			pct := float64(count) / float64(active) * 100
 			table.ColoredRow(
 				[]string{"Low", fmt.Sprintf("%d", count), FormatPercentage(pct)},
-				[]color.Color{*Green, *Green, *Green},
+				[]*color.Color{Green, Green, Green},
 			)
 		}
 	}

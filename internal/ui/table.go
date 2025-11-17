@@ -11,7 +11,7 @@ import (
 type Table struct {
 	Headers []string
 	Rows    [][]string
-	Colors  [][]color.Color // Optional colors for cells
+	Colors  [][]*color.Color // Optional colors for cells
 	Align   []Alignment     // Column alignment
 }
 
@@ -29,7 +29,7 @@ func NewTable(headers []string) *Table {
 	return &Table{
 		Headers: headers,
 		Rows:    make([][]string, 0),
-		Colors:  make([][]color.Color, 0),
+		Colors:  make([][]*color.Color, 0),
 		Align:   make([]Alignment, len(headers)),
 	}
 }
@@ -40,7 +40,7 @@ func (t *Table) AddRow(cells ...string) {
 }
 
 // AddColoredRow adds a row with specific colors
-func (t *Table) AddColoredRow(cells []string, colors []color.Color) {
+func (t *Table) AddColoredRow(cells []string, colors []*color.Color) {
 	t.Rows = append(t.Rows, cells)
 	t.Colors = append(t.Colors, colors)
 }
@@ -72,7 +72,7 @@ func (t *Table) Print() {
 	
 	// Print rows
 	for i, row := range t.Rows {
-		var rowColors []color.Color
+		var rowColors []*color.Color
 		if i < len(t.Colors) {
 			rowColors = t.Colors[i]
 		}
@@ -206,7 +206,7 @@ func (t *Table) printBorder(widths []int, left, mid, right string) {
 }
 
 // printRow prints a table row
-func (t *Table) printRow(cells []string, widths []int, isHeader bool, colors []color.Color) {
+func (t *Table) printRow(cells []string, widths []int, isHeader bool, colors []*color.Color) {
 	fmt.Print("│")
 	for i, cell := range cells {
 		if i < len(widths) {
@@ -349,7 +349,7 @@ func (tb *TableBuilder) Row(cells ...string) *TableBuilder {
 }
 
 // ColoredRow adds a colored row
-func (tb *TableBuilder) ColoredRow(cells []string, colors []color.Color) *TableBuilder {
+func (tb *TableBuilder) ColoredRow(cells []string, colors []*color.Color) *TableBuilder {
 	tb.table.AddColoredRow(cells, colors)
 	return tb
 }

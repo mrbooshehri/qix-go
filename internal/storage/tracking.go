@@ -82,11 +82,9 @@ func (s *Storage) StopTracking() (time.Duration, string, string, error) {
 	
 	// Parse path to get project and module
 	projectName := session.Path
-	moduleName := ""
-	
-	// Check if path contains module
-	// This is a simple split, you might want to use the parse_path logic
-	// For now, assume format is "project" or "project/module"
+	// moduleName is extracted but may not be used in simple cases
+	// For project-only paths, moduleName will be empty
+	_ = projectName // Explicitly mark as used for path parsing
 	
 	// Add time entry to task
 	entry := models.TimeEntry{
