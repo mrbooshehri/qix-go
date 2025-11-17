@@ -106,7 +106,7 @@ var versionCmd = &cobra.Command{
 		ui.PrintHeader("QIX - Quick Insight X")
 		fmt.Println("Version:    2.0.0")
 		fmt.Println("Build:      Go " + getGoVersion())
-		fmt.Println("Author:     Your Name")
+		fmt.Println("Author:     mrbooshehri")
 		fmt.Println("License:    MIT")
 		fmt.Println()
 		ui.PrintInfo("Rewritten in Go for 100x performance improvement!")
