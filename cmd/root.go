@@ -4,16 +4,18 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	"github.com/mrbooshehri/qix-go/internal/config"
+	"github.com/mrbooshehri/qix-go/internal/logging"
 	"github.com/mrbooshehri/qix-go/internal/storage"
 	"github.com/mrbooshehri/qix-go/internal/ui"
+	"github.com/spf13/cobra"
 )
 
 var (
 	// Global flags
-	noColor bool
-	verbose bool
+	noColor      bool
+	verbose      bool
+	logLevelFlag string
 )
 
 // rootCmd represents the base command
@@ -36,9 +38,20 @@ Version 2.0 - Rewritten in Go for blazing fast performance.`,
 			os.Exit(1)
 		}
 
+		// Initialize logging before other subsystems
+		cfg := config.Get()
+		if err := logging.Init(cfg.LogFile); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to initialize logging: %v\n", err)
+		}
+
+		if cmd.Flags().Changed("log-level") {
+			cfg.LogLevel = logLevelFlag
+		}
+		logging.SetLevel(cfg.LogLevel)
+		logging.Infof("Starting command: %s %v", cmd.CommandPath(), args)
+
 		// Override color setting if --no-color flag is used
 		if noColor {
-			cfg := config.Get()
 			cfg.ColorOutput = false
 		}
 
@@ -70,6 +83,7 @@ func init() {
 	// Global flags
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
+	rootCmd.PersistentFlags().StringVar(&logLevelFlag, "log-level", "info", "Log level (debug, info, warn, error)")
 
 	// Add subcommands
 	rootCmd.AddCommand(projectCmd)
@@ -81,6 +95,7 @@ func init() {
 	rootCmd.AddCommand(backupCmd)
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(jiraCmd)
 }
 
 // versionCmd displays version information
@@ -109,16 +124,16 @@ var doctorCmd = &cobra.Command{
 
 func runDoctor() {
 	ui.PrintHeader("QIX Doctor - System Health Check")
-	
+
 	store := storage.Get()
 	cfg := config.Get()
-	
+
 	issues := 0
 	warnings := 0
-	
+
 	// 1. Check directories
 	ui.PrintSubHeader("📁 Checking directories...")
-	
+
 	dirs := []string{cfg.QixDir, cfg.ProjectsDir, cfg.BackupDir}
 	for _, dir := range dirs {
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
@@ -129,10 +144,10 @@ func runDoctor() {
 		}
 	}
 	fmt.Println()
-	
+
 	// 2. Check permissions
 	ui.PrintSubHeader("🔒 Checking permissions...")
-	
+
 	info, err := os.Stat(cfg.QixDir)
 	if err == nil {
 		perms := info.Mode().Perm()
@@ -144,17 +159,17 @@ func runDoctor() {
 		}
 	}
 	fmt.Println()
-	
+
 	// 3. Validate project files
 	ui.PrintSubHeader("📄 Validating project files...")
-	
+
 	projects, err := store.ListProjects()
 	if err != nil {
 		ui.PrintError("Failed to list projects: %v", err)
 		issues++
 	} else {
 		ui.PrintInfo("Found %d project(s)", len(projects))
-		
+
 		for _, name := range projects {
 			if _, err := store.LoadProject(name); err != nil {
 				ui.PrintError("Corrupted project: %s (%v)", name, err)
@@ -165,20 +180,20 @@ func runDoctor() {
 		}
 	}
 	fmt.Println()
-	
+
 	// 4. Check index
 	ui.PrintSubHeader("📇 Checking task index...")
-	
+
 	if err := store.EnsureIndexFresh(); err != nil {
 		ui.PrintError("Index error: %v", err)
 		issues++
 	} else {
 		ui.PrintSuccess("Index is up to date")
 	}
-	
+
 	indexStats := store.GetIndexStats()
 	ui.PrintInfo("Index contains %v task(s)", indexStats["total_tasks"])
-	
+
 	// Validate index
 	if errors, err := store.ValidateIndex(); err != nil {
 		ui.PrintError("Index validation failed: %v", err)
@@ -193,17 +208,17 @@ func runDoctor() {
 		ui.PrintSuccess("Index is consistent")
 	}
 	fmt.Println()
-	
+
 	// 5. Check for orphaned references
 	ui.PrintSubHeader("🔗 Checking task relationships...")
-	
+
 	orphanCount := 0
 	for _, projectName := range projects {
 		orphaned, err := store.FindOrphanedReferences(projectName)
 		if err != nil {
 			continue
 		}
-		
+
 		for refType, refs := range orphaned {
 			if len(refs) > 0 {
 				ui.PrintWarning("Orphaned %s in %s:", refType, projectName)
@@ -214,25 +229,25 @@ func runDoctor() {
 			}
 		}
 	}
-	
+
 	if orphanCount == 0 {
 		ui.PrintSuccess("No orphaned references found")
 	} else {
 		warnings += orphanCount
 	}
 	fmt.Println()
-	
+
 	// 6. Cache statistics
 	ui.PrintSubHeader("💾 Cache statistics...")
-	
+
 	cacheStats := store.GetCacheStats()
 	ui.PrintInfo("Cached projects: %v", cacheStats["cached_projects"])
 	ui.PrintInfo("Dirty projects:  %v", cacheStats["dirty_projects"])
 	fmt.Println()
-	
+
 	// Summary
 	ui.PrintSeparator()
-	
+
 	if issues == 0 && warnings == 0 {
 		ui.PrintSuccess("All checks passed! Your QIX installation is healthy. ✨")
 	} else if issues == 0 {

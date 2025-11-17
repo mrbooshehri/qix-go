@@ -9,16 +9,19 @@ import (
 
 // Config holds application configuration
 type Config struct {
-	QixDir               string
-	ProjectsDir          string
-	TrackFile            string
-	IndexFile            string
-	ConfigFile           string
-	BackupDir            string
-	DateFormat           string
-	DateTimeFormat       string
-	BackupRetentionDays  int
-	ColorOutput          bool
+	QixDir              string
+	ProjectsDir         string
+	TrackFile           string
+	IndexFile           string
+	ConfigFile          string
+	BackupDir           string
+	DateFormat          string
+	DateTimeFormat      string
+	BackupRetentionDays int
+	ColorOutput         bool
+	JiraBaseURL         string
+	LogFile             string
+	LogLevel            string
 }
 
 var globalConfig *Config
@@ -57,6 +60,14 @@ func Init() error {
 	viper.SetDefault("datetime_format", "2006-01-02T15:04:05Z07:00")
 	viper.SetDefault("backup_retention_days", 30)
 	viper.SetDefault("color_output", true)
+	viper.SetDefault("jira_base_url", "")
+	viper.BindEnv("jira_base_url", "JIRA_BASE_URL")
+	viper.SetDefault("log_level", "info")
+	viper.BindEnv("log_level", "QIX_LOG_LEVEL")
+	viper.SetDefault("log_file", filepath.Join(qixDir, "qix.log"))
+	viper.BindEnv("log_file", "QIX_LOG_FILE")
+	viper.SetDefault("QIX_LOG_LEVEL", "info")
+	viper.SetDefault("QIX_LOG_FILE", filepath.Join(qixDir, "qix.log"))
 
 	// Try to read config file
 	if err := viper.ReadInConfig(); err != nil {
@@ -77,6 +88,17 @@ func Init() error {
 		DateTimeFormat:      viper.GetString("datetime_format"),
 		BackupRetentionDays: viper.GetInt("backup_retention_days"),
 		ColorOutput:         viper.GetBool("color_output"),
+		JiraBaseURL:         viper.GetString("jira_base_url"),
+		LogFile: firstNonEmpty(
+			viper.GetString("QIX_LOG_FILE"),
+			viper.GetString("log_file"),
+			filepath.Join(qixDir, "qix.log"),
+		),
+		LogLevel: firstNonEmpty(
+			viper.GetString("QIX_LOG_LEVEL"),
+			viper.GetString("log_level"),
+			"info",
+		),
 	}
 
 	return nil
@@ -109,7 +131,7 @@ func (c *Config) ListProjectFiles() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Extract just the project names (without path and .json extension)
 	projects := make([]string, 0, len(files))
 	for _, file := range files {
@@ -117,6 +139,15 @@ func (c *Config) ListProjectFiles() ([]string, error) {
 		name := base[:len(base)-5] // Remove .json
 		projects = append(projects, name)
 	}
-	
+
 	return projects, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

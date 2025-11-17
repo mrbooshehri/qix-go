@@ -1,15 +1,17 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/mrbooshehri/qix-go/internal/models"
 	"github.com/mrbooshehri/qix-go/internal/storage"
 	"github.com/mrbooshehri/qix-go/internal/ui"
+	"github.com/spf13/cobra"
 )
 
 var taskCmd = &cobra.Command{
@@ -25,17 +27,19 @@ var taskCreateCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		path := args[0]
 		title := strings.Join(args[1:], " ")
-		
+
 		// Parse path
 		projectName, moduleName := parsePath(path)
-		
+
 		// Get flags
 		description, _ := cmd.Flags().GetString("description")
 		status, _ := cmd.Flags().GetString("status")
 		priority, _ := cmd.Flags().GetString("priority")
 		estimated, _ := cmd.Flags().GetFloat64("estimated")
+		jiraIssue, _ := cmd.Flags().GetString("jira-issue")
 		tags, _ := cmd.Flags().GetStringSlice("tags")
-		
+		interactive, _ := cmd.Flags().GetBool("interactive")
+
 		// Validate status
 		taskStatus := models.StatusTodo
 		if status != "" {
@@ -53,7 +57,7 @@ var taskCreateCmd = &cobra.Command{
 				return
 			}
 		}
-		
+
 		// Validate priority
 		taskPriority := models.PriorityMedium
 		if priority != "" {
@@ -69,7 +73,7 @@ var taskCreateCmd = &cobra.Command{
 				return
 			}
 		}
-		
+
 		// Create task
 		task := models.Task{
 			Title:          title,
@@ -78,28 +82,43 @@ var taskCreateCmd = &cobra.Command{
 			Priority:       taskPriority,
 			EstimatedHours: estimated,
 			Tags:           tags,
+			JiraIssue:      strings.TrimSpace(jiraIssue),
 		}
-		
+
+		if interactive {
+			if err := runInteractiveTaskCreate(&task); err != nil {
+				ui.PrintError("Failed to gather task details: %v", err)
+				return
+			}
+		}
+
+		if task.ID == "" {
+			task.ID = storage.GenerateTaskID()
+		}
+
 		store := storage.Get()
-		
+
 		if err := store.AddTask(projectName, moduleName, task); err != nil {
 			ui.PrintError("Failed to create task: %v", err)
 			return
 		}
-		
-		ui.PrintSuccess("Task created: %s", title)
-		ui.Dim.Printf("  ID: %s\n", task.ID)
-		
+
+		ui.PrintSuccess("Task created with ID: %s", task.ID)
+		ui.Dim.Printf("  Title: %s\n", title)
+
 		if moduleName != "" {
 			ui.Dim.Printf("  Location: %s/%s\n", projectName, moduleName)
 		} else {
 			ui.Dim.Printf("  Location: %s (project level)\n", projectName)
 		}
-		
+
 		ui.Dim.Printf("  Status: %s | Priority: %s\n", taskStatus, taskPriority)
-		
+
 		if estimated > 0 {
 			ui.Dim.Printf("  Estimated: %s\n", ui.FormatHours(estimated))
+		}
+		if jiraIssue != "" {
+			ui.Dim.Printf("  Jira: %s\n", jiraIssue)
 		}
 	},
 }
@@ -111,20 +130,20 @@ var taskListCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		path := args[0]
 		projectName, moduleName := parsePath(path)
-		
+
 		all, _ := cmd.Flags().GetBool("all")
 		status, _ := cmd.Flags().GetString("status")
-		
+
 		store := storage.Get()
-		
+
 		project, err := store.LoadProject(projectName)
 		if err != nil {
 			ui.PrintError("Project not found: %s", projectName)
 			return
 		}
-		
+
 		var tasks []models.Task
-		
+
 		if moduleName != "" {
 			// List tasks in specific module
 			moduleTasks, err := store.ListTasksInModule(projectName, moduleName)
@@ -133,7 +152,7 @@ var taskListCmd = &cobra.Command{
 				return
 			}
 			tasks = moduleTasks
-			
+
 			ui.PrintHeader(fmt.Sprintf("📋 Tasks in %s/%s", projectName, moduleName))
 		} else if all {
 			// List all tasks recursively
@@ -144,7 +163,7 @@ var taskListCmd = &cobra.Command{
 			tasks = project.Tasks
 			ui.PrintHeader(fmt.Sprintf("📋 Project-Level Tasks in %s", projectName))
 		}
-		
+
 		// Filter by status if specified
 		if status != "" {
 			var filtered []models.Task
@@ -155,7 +174,7 @@ var taskListCmd = &cobra.Command{
 			}
 			tasks = filtered
 		}
-		
+
 		if len(tasks) == 0 {
 			msg := fmt.Sprintf("No tasks found in %s", path)
 			if status != "" {
@@ -164,13 +183,13 @@ var taskListCmd = &cobra.Command{
 			ui.PrintEmptyState(msg, fmt.Sprintf("Create one with: qix task create %s <title>", path))
 			return
 		}
-		
+
 		// Group by status
 		byStatus := make(map[models.TaskStatus][]models.Task)
 		for _, task := range tasks {
 			byStatus[task.Status] = append(byStatus[task.Status], task)
 		}
-		
+
 		// Print by status
 		statusOrder := []models.TaskStatus{
 			models.StatusDoing,
@@ -178,24 +197,24 @@ var taskListCmd = &cobra.Command{
 			models.StatusBlocked,
 			models.StatusDone,
 		}
-		
+
 		for _, st := range statusOrder {
 			if len(byStatus[st]) == 0 {
 				continue
 			}
-			
+
 			statusColor := ui.GetStatusColor(st)
 			statusIcon := ui.GetStatusIcon(st)
-			
+
 			fmt.Println()
 			statusColor.Printf("%s %s (%d)\n", statusIcon, st, len(byStatus[st]))
 			ui.PrintSeparator()
-			
+
 			for _, task := range byStatus[st] {
 				ui.PrintTask(task, "  ")
 			}
 		}
-		
+
 		fmt.Println()
 	},
 }
@@ -207,27 +226,17 @@ var taskShowCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		projectName := args[0]
 		taskID := args[1]
-		
+
 		store := storage.Get()
-		
+
 		task, location, err := store.FindTask(projectName, taskID)
 		if err != nil {
 			ui.PrintError("Task not found: %v", err)
 			return
 		}
-		
-		ui.PrintTaskDetailed(*task)
-		
-		// Show location
-		fmt.Println()
-		ui.BoldBlue.Print("📍 Location: ")
-		if location == "project" {
-			fmt.Printf("%s (project level)\n", projectName)
-		} else {
-			moduleName := strings.TrimPrefix(location, "module:")
-			fmt.Printf("%s/%s\n", projectName, moduleName)
-		}
-		
+
+		ui.PrintTaskDetailed(*task, formatTaskLocation(projectName, location))
+
 		// Show parent task if exists
 		if task.ParentID != "" {
 			parentTask, _, err := store.FindTask(projectName, task.ParentID)
@@ -237,7 +246,7 @@ var taskShowCmd = &cobra.Command{
 				ui.Magenta.Printf("   [%s] %s\n", parentTask.ID, parentTask.Title)
 			}
 		}
-		
+
 		// Show child tasks
 		children, err := store.GetChildTasks(projectName, taskID)
 		if err == nil && len(children) > 0 {
@@ -245,14 +254,14 @@ var taskShowCmd = &cobra.Command{
 			ui.BoldBlue.Println("👶 Child Tasks:")
 			for _, child := range children {
 				statusColor := ui.GetStatusColor(child.Status)
-				statusColor.Printf("   %s [%s] %s [%s]\n", 
-					ui.GetStatusIcon(child.Status), 
-					child.ID, 
-					child.Title, 
+				statusColor.Printf("   %s [%s] %s [%s]\n",
+					ui.GetStatusIcon(child.Status),
+					child.ID,
+					child.Title,
 					child.Status)
 			}
 		}
-		
+
 		// Show dependent tasks
 		dependents, err := store.GetDependentTasks(projectName, taskID)
 		if err == nil && len(dependents) > 0 {
@@ -273,7 +282,7 @@ var taskUpdateCmd = &cobra.Command{
 		projectName := args[0]
 		taskID := args[1]
 		statusStr := args[2]
-		
+
 		// Validate status
 		var status models.TaskStatus
 		switch statusStr {
@@ -289,29 +298,29 @@ var taskUpdateCmd = &cobra.Command{
 			ui.PrintError("Invalid status. Use: todo, doing, done, blocked")
 			return
 		}
-		
+
 		store := storage.Get()
-		
+
 		// Get task first to show before/after
 		task, _, err := store.FindTask(projectName, taskID)
 		if err != nil {
 			ui.PrintError("Task not found: %v", err)
 			return
 		}
-		
+
 		oldStatus := task.Status
-		
+
 		if err := store.UpdateTaskStatus(projectName, taskID, status); err != nil {
 			ui.PrintError("Failed to update task: %v", err)
 			return
 		}
-		
+
 		ui.PrintSuccess("Task status updated")
 		ui.Cyan.Printf("  [%s] %s\n", taskID, task.Title)
-		
+
 		oldColor := ui.GetStatusColor(oldStatus)
 		newColor := ui.GetStatusColor(status)
-		
+
 		fmt.Print("  ")
 		oldColor.Printf("%s %s", ui.GetStatusIcon(oldStatus), oldStatus)
 		fmt.Print(" → ")
@@ -326,21 +335,24 @@ var taskEditCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		projectName := args[0]
 		taskID := args[1]
-		
+
 		title, _ := cmd.Flags().GetString("title")
 		description, _ := cmd.Flags().GetString("description")
 		status, _ := cmd.Flags().GetString("status")
 		priority, _ := cmd.Flags().GetString("priority")
 		estimated, _ := cmd.Flags().GetFloat64("estimated")
-		
-		if title == "" && description == "" && status == "" && priority == "" && estimated == 0 {
-			ui.PrintError("Specify at least one field to update")
-			ui.Dim.Println("  Use --title, --description, --status, --priority, or --estimated")
+		jiraIssue, _ := cmd.Flags().GetString("jira-issue")
+		jiraIssueChanged := cmd.Flags().Changed("jira-issue")
+
+		if title == "" && description == "" && status == "" && priority == "" && estimated == 0 && !jiraIssueChanged {
+			if err := runInteractiveTaskEdit(projectName, taskID); err != nil {
+				ui.PrintError("Failed to update task: %v", err)
+			}
 			return
 		}
-		
+
 		store := storage.Get()
-		
+
 		err := store.UpdateTask(projectName, taskID, func(t *models.Task) error {
 			if title != "" {
 				t.Title = title
@@ -377,14 +389,17 @@ var taskEditCmd = &cobra.Command{
 			if estimated > 0 {
 				t.EstimatedHours = estimated
 			}
+			if jiraIssueChanged {
+				t.JiraIssue = strings.TrimSpace(jiraIssue)
+			}
 			return nil
 		})
-		
+
 		if err != nil {
 			ui.PrintError("Failed to update task: %v", err)
 			return
 		}
-		
+
 		ui.PrintSuccess("Task updated: %s", taskID)
 	},
 }
@@ -396,37 +411,37 @@ var taskRemoveCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		projectName := args[0]
 		taskID := args[1]
-		
+
 		store := storage.Get()
-		
+
 		// Get task details first
 		task, _, err := store.FindTask(projectName, taskID)
 		if err != nil {
 			ui.PrintError("Task not found: %v", err)
 			return
 		}
-		
+
 		// Confirmation
 		force, _ := cmd.Flags().GetBool("force")
-		
+
 		if !force {
 			fmt.Printf("⚠️  Delete task '%s' [%s]?\n", task.Title, taskID)
 			fmt.Print("Type 'yes' to confirm: ")
-			
+
 			var confirm string
 			fmt.Scanln(&confirm)
-			
+
 			if confirm != "yes" {
 				ui.PrintInfo("Deletion cancelled")
 				return
 			}
 		}
-		
+
 		if err := store.RemoveTask(projectName, taskID); err != nil {
 			ui.PrintError("Failed to remove task: %v", err)
 			return
 		}
-		
+
 		ui.PrintSuccess("Task removed: [%s] %s", taskID, task.Title)
 	},
 }
@@ -440,27 +455,27 @@ var taskLinkCmd = &cobra.Command{
 		projectName := args[0]
 		childID := args[1]
 		parentID := args[2]
-		
+
 		store := storage.Get()
-		
+
 		// Get task details
 		childTask, _, err := store.FindTask(projectName, childID)
 		if err != nil {
 			ui.PrintError("Child task not found: %v", err)
 			return
 		}
-		
+
 		parentTask, _, err := store.FindTask(projectName, parentID)
 		if err != nil {
 			ui.PrintError("Parent task not found: %v", err)
 			return
 		}
-		
+
 		if err := store.LinkTaskAsChild(projectName, childID, parentID); err != nil {
 			ui.PrintError("Failed to link tasks: %v", err)
 			return
 		}
-		
+
 		ui.PrintSuccess("Task linked successfully")
 		ui.Cyan.Printf("  Child:  [%s] %s\n", childID, childTask.Title)
 		ui.Magenta.Printf("  Parent: [%s] %s\n", parentID, parentTask.Title)
@@ -476,32 +491,32 @@ var taskDependCmd = &cobra.Command{
 		projectName := args[0]
 		taskID := args[1]
 		dependsOnID := args[2]
-		
+
 		store := storage.Get()
-		
+
 		// Get task details
 		task, _, err := store.FindTask(projectName, taskID)
 		if err != nil {
 			ui.PrintError("Task not found: %v", err)
 			return
 		}
-		
+
 		depTask, _, err := store.FindTask(projectName, dependsOnID)
 		if err != nil {
 			ui.PrintError("Dependency task not found: %v", err)
 			return
 		}
-		
+
 		if err := store.AddTaskDependency(projectName, taskID, dependsOnID); err != nil {
 			ui.PrintError("Failed to add dependency: %v", err)
 			return
 		}
-		
+
 		ui.PrintSuccess("Dependency added")
 		ui.Yellow.Printf("  [%s] %s\n", taskID, task.Title)
 		ui.Cyan.Print("  ↓ depends on\n")
 		ui.Green.Printf("  [%s] %s\n", dependsOnID, depTask.Title)
-		
+
 		if depTask.Status != models.StatusDone {
 			ui.PrintWarning("Note: [%s] is not done yet (%s)", dependsOnID, depTask.Status)
 		}
@@ -529,28 +544,28 @@ Examples:
 		projectName := args[0]
 		taskID := args[1]
 		pattern := args[2]
-		
+
 		// Parse pattern
 		recurrence, err := parseRecurrencePattern(pattern)
 		if err != nil {
 			ui.PrintError("Invalid pattern: %v", err)
 			return
 		}
-		
+
 		store := storage.Get()
-		
+
 		// Get task
 		task, _, err := store.FindTask(projectName, taskID)
 		if err != nil {
 			ui.PrintError("Task not found: %v", err)
 			return
 		}
-		
+
 		if err := store.SetTaskRecurrence(projectName, taskID, *recurrence); err != nil {
 			ui.PrintError("Failed to set recurrence: %v", err)
 			return
 		}
-		
+
 		ui.PrintSuccess("Recurring schedule set")
 		ui.Cyan.Printf("  Task: [%s] %s\n", taskID, task.Title)
 		ui.Yellow.Printf("  Pattern: %s\n", pattern)
@@ -565,14 +580,14 @@ var taskUnrecurCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		projectName := args[0]
 		taskID := args[1]
-		
+
 		store := storage.Get()
-		
+
 		if err := store.RemoveTaskRecurrence(projectName, taskID); err != nil {
 			ui.PrintError("Failed to remove recurrence: %v", err)
 			return
 		}
-		
+
 		ui.PrintSuccess("Recurrence removed from task: %s", taskID)
 	},
 }
@@ -583,12 +598,12 @@ var taskDueCmd = &cobra.Command{
 	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		today := time.Now().Format("2006-01-02")
-		
+
 		store := storage.Get()
-		
+
 		var projects []string
 		var err error
-		
+
 		if len(args) > 0 {
 			projects = []string{args[0]}
 		} else {
@@ -598,24 +613,24 @@ var taskDueCmd = &cobra.Command{
 				return
 			}
 		}
-		
+
 		ui.PrintHeader(fmt.Sprintf("🔔 Tasks Due Today - %s", ui.FormatDate(today)))
-		
+
 		found := false
-		
+
 		for _, projectName := range projects {
 			tasks, err := store.GetRecurringTasksDue(projectName, today)
 			if err != nil {
 				continue
 			}
-			
+
 			if len(tasks) > 0 {
 				found = true
 				ui.PrintSubHeader(fmt.Sprintf("📁 %s", projectName))
-				
+
 				for _, task := range tasks {
 					ui.Yellow.Printf("  🔔 [%s] %s\n", task.ID, task.Title)
-					
+
 					if task.Recurrence != nil {
 						pattern := string(task.Recurrence.Type)
 						if task.Recurrence.Value != "" {
@@ -627,7 +642,7 @@ var taskDueCmd = &cobra.Command{
 				fmt.Println()
 			}
 		}
-		
+
 		if !found {
 			ui.PrintEmptyState("No recurring tasks due today", "")
 		}
@@ -642,16 +657,16 @@ var taskCompleteCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		projectName := args[0]
 		taskID := args[1]
-		
+
 		store := storage.Get()
-		
+
 		// Get task
 		task, _, err := store.FindTask(projectName, taskID)
 		if err != nil {
 			ui.PrintError("Task not found: %v", err)
 			return
 		}
-		
+
 		// Check if recurring
 		if !task.IsRecurring() {
 			// Just update status
@@ -659,17 +674,17 @@ var taskCompleteCmd = &cobra.Command{
 				ui.PrintError("Failed to complete task: %v", err)
 				return
 			}
-			
+
 			ui.PrintSuccess("Task completed: [%s] %s", taskID, task.Title)
 			return
 		}
-		
+
 		// Handle recurring task
 		today := time.Now().Format("2006-01-02")
-		
+
 		// Calculate next occurrence
 		nextDue := calculateNextOccurrence(task.Recurrence.Type, task.Recurrence.Value)
-		
+
 		// Update task
 		err = store.UpdateTask(projectName, taskID, func(t *models.Task) error {
 			t.Status = models.StatusDone
@@ -679,12 +694,12 @@ var taskCompleteCmd = &cobra.Command{
 			}
 			return nil
 		})
-		
+
 		if err != nil {
 			ui.PrintError("Failed to complete task: %v", err)
 			return
 		}
-		
+
 		ui.PrintSuccess("Recurring task completed")
 		ui.Cyan.Printf("  Task: [%s] %s\n", taskID, task.Title)
 		ui.Green.Printf("  Completed: %s\n", ui.FormatDate(today))
@@ -693,6 +708,195 @@ var taskCompleteCmd = &cobra.Command{
 }
 
 // Helper functions
+
+func taskPathCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) == 0 {
+		return completeProjectModulePaths(toComplete)
+	}
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func taskDueCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) == 0 {
+		return completeProjectNames(toComplete)
+	}
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+func runInteractiveTaskEdit(projectName, taskID string) error {
+	store := storage.Get()
+	task, _, err := store.FindTask(projectName, taskID)
+	if err != nil {
+		return err
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println()
+	ui.PrintHeader("Interactive Task Editor")
+	fmt.Printf("Editing [%s] %s\n", task.ID, task.Title)
+	fmt.Println("Press Enter to keep the current value. Type '-' to clear Jira Issue.")
+	fmt.Println()
+
+	edited := *task
+
+	edited.Title = promptWithDefault(reader, "Title", task.Title)
+	edited.Description = promptWithDefault(reader, "Description", task.Description)
+	edited.Status = promptStatus(reader, task.Status)
+	edited.Priority = promptPriority(reader, task.Priority)
+	edited.EstimatedHours = promptEstimated(reader, task.EstimatedHours)
+	edited.JiraIssue = promptJira(reader, task.JiraIssue)
+
+	if err := store.UpdateTask(projectName, taskID, func(t *models.Task) error {
+		t.Title = edited.Title
+		t.Description = edited.Description
+		t.Status = edited.Status
+		t.Priority = edited.Priority
+		t.EstimatedHours = edited.EstimatedHours
+		t.JiraIssue = edited.JiraIssue
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	ui.PrintSuccess("Task updated: %s", taskID)
+	return nil
+}
+
+func runInteractiveTaskCreate(task *models.Task) error {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println()
+	ui.PrintHeader("Interactive Task Creator")
+	fmt.Println("Provide values for the following fields (press Enter to keep defaults).")
+	fmt.Println()
+
+	task.Description = promptWithDefault(reader, "Description", task.Description)
+	task.EstimatedHours = promptEstimated(reader, task.EstimatedHours)
+	task.Status = promptStatus(reader, task.Status)
+	task.Priority = promptPriority(reader, task.Priority)
+	task.Tags = promptTags(reader, task.Tags)
+	task.JiraIssue = promptJira(reader, task.JiraIssue)
+
+	return nil
+}
+
+func promptWithDefault(reader *bufio.Reader, label, current string) string {
+	display := current
+	if display == "" {
+		display = "<empty>"
+	}
+	fmt.Printf("%s [%s]: ", label, display)
+	input, _ := reader.ReadString('\n')
+	value := strings.TrimSpace(input)
+	if value == "" {
+		return current
+	}
+	return value
+}
+
+func promptStatus(reader *bufio.Reader, current models.TaskStatus) models.TaskStatus {
+	for {
+		fmt.Printf("Status [%s] (todo/doing/done/blocked): ", current)
+		input, _ := reader.ReadString('\n')
+		value := strings.TrimSpace(strings.ToLower(input))
+		if value == "" {
+			return current
+		}
+		switch value {
+		case "todo":
+			return models.StatusTodo
+		case "doing":
+			return models.StatusDoing
+		case "done":
+			return models.StatusDone
+		case "blocked":
+			return models.StatusBlocked
+		default:
+			fmt.Println("Invalid status. Use todo, doing, done, or blocked.")
+		}
+	}
+}
+
+func promptPriority(reader *bufio.Reader, current models.Priority) models.Priority {
+	for {
+		fmt.Printf("Priority [%s] (low/medium/high): ", current)
+		input, _ := reader.ReadString('\n')
+		value := strings.TrimSpace(strings.ToLower(input))
+		if value == "" {
+			return current
+		}
+		switch value {
+		case "low":
+			return models.PriorityLow
+		case "medium":
+			return models.PriorityMedium
+		case "high":
+			return models.PriorityHigh
+		default:
+			fmt.Println("Invalid priority. Use low, medium, or high.")
+		}
+	}
+}
+
+func promptEstimated(reader *bufio.Reader, current float64) float64 {
+	for {
+		fmt.Printf("Estimated Hours [%.2f]: ", current)
+		input, _ := reader.ReadString('\n')
+		value := strings.TrimSpace(input)
+		if value == "" {
+			return current
+		}
+		val, err := strconv.ParseFloat(value, 64)
+		if err != nil || val < 0 {
+			fmt.Println("Enter a positive number (e.g., 1.5).")
+			continue
+		}
+		return val
+	}
+}
+
+func promptJira(reader *bufio.Reader, current string) string {
+	display := current
+	if display == "" {
+		display = "<none>"
+	}
+	for {
+		fmt.Printf("Jira Issue ID [%s] (use '-' to clear): ", display)
+		input, _ := reader.ReadString('\n')
+		value := strings.TrimSpace(input)
+		switch value {
+		case "":
+			return current
+		case "-":
+			return ""
+		default:
+			return value
+		}
+	}
+}
+
+func promptTags(reader *bufio.Reader, current []string) []string {
+	display := "<none>"
+	if len(current) > 0 {
+		display = strings.Join(current, ", ")
+	}
+
+	fmt.Printf("Tags (comma-separated) [%s]: ", display)
+	input, _ := reader.ReadString('\n')
+	value := strings.TrimSpace(input)
+	if value == "" {
+		return current
+	}
+
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		tag := strings.TrimSpace(part)
+		if tag != "" {
+			result = append(result, tag)
+		}
+	}
+	return result
+}
 
 func parsePath(path string) (project, module string) {
 	parts := strings.SplitN(path, "/", 2)
@@ -703,6 +907,14 @@ func parsePath(path string) (project, module string) {
 	return
 }
 
+func formatTaskLocation(projectName, location string) string {
+	if location == "project" {
+		return fmt.Sprintf("%s (project level)", projectName)
+	}
+	moduleName := strings.TrimPrefix(location, "module:")
+	return fmt.Sprintf("%s/%s", projectName, moduleName)
+}
+
 func parseRecurrencePattern(pattern string) (*models.Recurrence, error) {
 	parts := strings.SplitN(pattern, ":", 2)
 	recType := parts[0]
@@ -710,9 +922,9 @@ func parseRecurrencePattern(pattern string) (*models.Recurrence, error) {
 	if len(parts) > 1 {
 		recValue = parts[1]
 	}
-	
+
 	var rType models.RecurrenceType
-	
+
 	switch recType {
 	case "daily":
 		rType = models.RecurDaily
@@ -742,9 +954,9 @@ func parseRecurrencePattern(pattern string) (*models.Recurrence, error) {
 	default:
 		return nil, fmt.Errorf("unknown pattern type: %s (use: daily, weekly, monthly, interval)", recType)
 	}
-	
+
 	nextDue := calculateNextOccurrence(rType, recValue)
-	
+
 	return &models.Recurrence{
 		Type:    rType,
 		Value:   recValue,
@@ -755,11 +967,11 @@ func parseRecurrencePattern(pattern string) (*models.Recurrence, error) {
 
 func calculateNextOccurrence(recType models.RecurrenceType, value string) string {
 	now := time.Now()
-	
+
 	switch recType {
 	case models.RecurDaily:
 		return now.AddDate(0, 0, 1).Format("2006-01-02")
-		
+
 	case models.RecurWeekly:
 		// Find next occurrence of the specified day
 		targetDay := value
@@ -768,36 +980,36 @@ func calculateNextOccurrence(recType models.RecurrenceType, value string) string
 			"wednesday": time.Wednesday, "thursday": time.Thursday,
 			"friday": time.Friday, "saturday": time.Saturday,
 		}
-		
+
 		target, ok := daysOfWeek[strings.ToLower(targetDay)]
 		if !ok {
 			return now.Format("2006-01-02")
 		}
-		
+
 		daysUntil := (int(target) - int(now.Weekday()) + 7) % 7
 		if daysUntil == 0 {
 			daysUntil = 7 // Next week
 		}
-		
+
 		return now.AddDate(0, 0, daysUntil).Format("2006-01-02")
-		
+
 	case models.RecurMonthly:
 		day, _ := strconv.Atoi(value)
 		nextMonth := now.AddDate(0, 1, 0)
-		
+
 		// Handle months with fewer days
 		lastDay := time.Date(nextMonth.Year(), nextMonth.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day()
 		if day > lastDay {
 			day = lastDay
 		}
-		
+
 		return time.Date(nextMonth.Year(), nextMonth.Month(), day, 0, 0, 0, 0, time.UTC).Format("2006-01-02")
-		
+
 	case models.RecurInterval:
 		days, _ := strconv.Atoi(value)
 		return now.AddDate(0, 0, days).Format("2006-01-02")
 	}
-	
+
 	return now.Format("2006-01-02")
 }
 
@@ -808,21 +1020,37 @@ func init() {
 	taskCreateCmd.Flags().StringP("priority", "p", "medium", "Task priority (low/medium/high)")
 	taskCreateCmd.Flags().Float64P("estimated", "e", 0, "Estimated hours")
 	taskCreateCmd.Flags().StringSliceP("tags", "t", []string{}, "Task tags")
-	
+	taskCreateCmd.Flags().String("jira-issue", "", "Jira issue ID")
+	taskCreateCmd.Flags().BoolP("interactive", "i", false, "Interactive mode to enter task details")
+	taskCreateCmd.ValidArgsFunction = taskPathCompletion
+
 	// task list flags
 	taskListCmd.Flags().BoolP("all", "a", false, "Show all tasks recursively")
 	taskListCmd.Flags().StringP("status", "s", "", "Filter by status")
-	
+	taskListCmd.ValidArgsFunction = taskPathCompletion
+
+	taskShowCmd.ValidArgsFunction = projectTaskArgCompletion
+	taskUpdateCmd.ValidArgsFunction = projectTaskArgCompletion
+	taskEditCmd.ValidArgsFunction = projectTaskArgCompletion
+	taskRemoveCmd.ValidArgsFunction = projectTaskArgCompletion
+	taskRecurCmd.ValidArgsFunction = projectTaskArgCompletion
+	taskUnrecurCmd.ValidArgsFunction = projectTaskArgCompletion
+	taskDueCmd.ValidArgsFunction = taskDueCompletion
+	taskCompleteCmd.ValidArgsFunction = projectTaskArgCompletion
+	taskLinkCmd.ValidArgsFunction = projectTwoTaskArgCompletion
+	taskDependCmd.ValidArgsFunction = projectTwoTaskArgCompletion
+
 	// task edit flags
 	taskEditCmd.Flags().String("title", "", "New title")
 	taskEditCmd.Flags().StringP("description", "d", "", "New description")
 	taskEditCmd.Flags().StringP("status", "s", "", "New status")
 	taskEditCmd.Flags().StringP("priority", "p", "", "New priority")
 	taskEditCmd.Flags().Float64P("estimated", "e", 0, "New estimated hours")
-	
+	taskEditCmd.Flags().String("jira-issue", "", "Set Jira issue ID (use empty string to clear)")
+
 	// task remove flags
 	taskRemoveCmd.Flags().BoolP("force", "f", false, "Skip confirmation")
-	
+
 	// Add subcommands
 	taskCmd.AddCommand(taskCreateCmd)
 	taskCmd.AddCommand(taskListCmd)

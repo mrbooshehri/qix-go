@@ -19,7 +19,7 @@ var (
 	Cyan    = color.New(color.FgCyan)
 	Magenta = color.New(color.FgMagenta)
 	White   = color.New(color.FgWhite)
-	
+
 	// Bold variants
 	BoldRed     = color.New(color.FgRed, color.Bold)
 	BoldGreen   = color.New(color.FgGreen, color.Bold)
@@ -27,7 +27,7 @@ var (
 	BoldBlue    = color.New(color.FgBlue, color.Bold)
 	BoldCyan    = color.New(color.FgCyan, color.Bold)
 	BoldMagenta = color.New(color.FgMagenta, color.Bold)
-	
+
 	// Dim
 	Dim = color.New(color.Faint)
 )
@@ -77,19 +77,19 @@ func PrintBox(title string, lines []string) {
 			width = len(line) + 4
 		}
 	}
-	
+
 	Cyan.Println("╔" + strings.Repeat("═", width-2) + "╗")
 	Cyan.Print("║ ")
 	BoldCyan.Print(title)
 	Cyan.Println(strings.Repeat(" ", width-len(title)-3) + "║")
 	Cyan.Println("╠" + strings.Repeat("═", width-2) + "╣")
-	
+
 	for _, line := range lines {
 		Cyan.Print("║ ")
 		fmt.Print(line)
 		Cyan.Println(strings.Repeat(" ", width-len(line)-3) + "║")
 	}
-	
+
 	Cyan.Println("╚" + strings.Repeat("═", width-2) + "╝")
 }
 
@@ -98,7 +98,7 @@ func FormatDuration(d time.Duration) string {
 	hours := int(d.Hours())
 	minutes := int(d.Minutes()) % 60
 	seconds := int(d.Seconds()) % 60
-	
+
 	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
 }
 
@@ -190,29 +190,29 @@ func GetPriorityColor(priority models.Priority) *color.Color {
 func PrintTask(task models.Task, indent string) {
 	statusColor := GetStatusColor(task.Status)
 	statusIcon := GetStatusIcon(task.Status)
-	
+
 	// Task line
 	statusColor.Printf("%s%s [%s] %s", indent, statusIcon, task.ID, task.Title)
-	
+
 	// Priority badge
 	if task.Priority != "" {
 		priorityColor := GetPriorityColor(task.Priority)
 		priorityColor.Printf(" [%s]", task.Priority)
 	}
-	
+
 	// Status badge
 	statusColor.Printf(" [%s]\n", task.Status)
-	
+
 	// Time info
 	if task.EstimatedHours > 0 {
 		actual := task.CalculateActualHours()
 		variance := actual - task.EstimatedHours
-		
-		fmt.Printf("%s   ⏱️  Est: %s | Act: %s", 
-			indent, 
-			FormatHours(task.EstimatedHours), 
+
+		fmt.Printf("%s   ⏱️  Est: %s | Act: %s",
+			indent,
+			FormatHours(task.EstimatedHours),
 			FormatHours(actual))
-		
+
 		if variance != 0 {
 			if variance > 0 {
 				Red.Printf(" | +%s over", FormatHours(variance))
@@ -222,7 +222,7 @@ func PrintTask(task models.Task, indent string) {
 		}
 		fmt.Println()
 	}
-	
+
 	// Tags
 	if len(task.Tags) > 0 {
 		Dim.Printf("%s   🏷️  %s\n", indent, strings.Join(task.Tags, ", "))
@@ -230,153 +230,95 @@ func PrintTask(task models.Task, indent string) {
 }
 
 // PrintTaskDetailed prints a task with full details
-func PrintTaskDetailed(task models.Task) {
-	PrintBox(task.Title, []string{})
-	
-	// Basic info
-	fmt.Println()
-	BoldBlue.Print("ID:          ")
-	fmt.Println(task.ID)
-	
-	BoldBlue.Print("Status:      ")
-	statusColor := GetStatusColor(task.Status)
-	statusColor.Printf("%s %s\n", GetStatusIcon(task.Status), task.Status)
-	
-	BoldBlue.Print("Priority:    ")
-	priorityColor := GetPriorityColor(task.Priority)
-	priorityColor.Printf("%s %s\n", GetPriorityIcon(task.Priority), task.Priority)
-	
-	if task.Description != "" {
-		BoldBlue.Print("Description: ")
-		fmt.Println(task.Description)
+func PrintTaskDetailed(task models.Task, location string) {
+	sections := []sectionBlock{
+		newSectionBlock("Details", buildTaskDetailsSection(task)),
+		newSectionBlock("⏱️  Time Tracking", buildTaskTimeSection(task)),
 	}
-	
-	// Time tracking
-	fmt.Println()
-	BoldBlue.Println("⏱️  Time Tracking:")
-	fmt.Printf("   Estimated:  %s\n", FormatHours(task.EstimatedHours))
-	
-	actual := task.CalculateActualHours()
-	fmt.Printf("   Actual:     %s\n", FormatHours(actual))
-	
-	if task.EstimatedHours > 0 {
-		variance := task.GetVariance()
-		varPct := task.GetVariancePercentage()
-		
-		fmt.Print("   Variance:   ")
-		if variance > 0 {
-			Red.Printf("+%s (%.1f%% over)\n", FormatHours(variance), varPct)
-		} else if variance < 0 {
-			Green.Printf("%s (%.1f%% under)\n", FormatHours(variance), -varPct)
-		} else {
-			fmt.Println("On target")
-		}
-	}
-	
-	// Time entries
+
 	if len(task.TimeEntries) > 0 {
-		fmt.Println()
-		BoldBlue.Println("📅 Time Entries:")
-		for _, entry := range task.TimeEntries {
-			Cyan.Printf("   %s: %s\n", entry.Date, FormatHours(entry.Hours))
-		}
+		sections = append(sections, newSectionBlock("📅 Time Entries", formatTimeEntries(task.TimeEntries)))
 	}
-	
-	// Recurrence
+
 	if task.Recurrence != nil && task.Recurrence.Enabled {
-		fmt.Println()
-		BoldBlue.Println("🔁 Recurrence:")
-		fmt.Printf("   Pattern:    %s", task.Recurrence.Type)
-		if task.Recurrence.Value != "" {
-			fmt.Printf(" (%s)", task.Recurrence.Value)
-		}
-		fmt.Println()
-		fmt.Printf("   Next Due:   %s\n", FormatDate(task.Recurrence.NextDue))
-		if task.Recurrence.LastCompleted != "" {
-			fmt.Printf("   Last Done:  %s\n", FormatDate(task.Recurrence.LastCompleted))
-		}
+		sections = append(sections, newSectionBlock("🔁 Recurrence", formatRecurrence(task.Recurrence)))
 	}
-	
-	// Dependencies
+
 	if len(task.Dependencies) > 0 {
-		fmt.Println()
-		BoldBlue.Println("🔗 Dependencies:")
-		for _, depID := range task.Dependencies {
-			Yellow.Printf("   → Depends on: %s\n", depID)
-		}
+		sections = append(sections, newSectionBlock("🔗 Dependencies", formatDependencies(task.Dependencies)))
 	}
-	
-	// Parent
+
 	if task.ParentID != "" {
-		fmt.Println()
-		BoldBlue.Println("👨‍👩‍👧 Hierarchy:")
-		Magenta.Printf("   Parent: %s\n", task.ParentID)
+		sections = append(sections, newSectionBlock("👨‍👩‍👧 Hierarchy", []string{fmt.Sprintf("Parent: %s", task.ParentID)}))
 	}
-	
-	// Tags
+
 	if len(task.Tags) > 0 {
-		fmt.Println()
-		BoldBlue.Println("🏷️  Tags:")
-		fmt.Printf("   %s\n", strings.Join(task.Tags, ", "))
+		sections = append(sections, newSectionBlock("🏷️  Tags", []string{strings.Join(task.Tags, ", ")}))
 	}
-	
-	// Timestamps
-	fmt.Println()
-	Dim.Printf("Created: %s\n", FormatDateTime(task.CreatedAt))
-	Dim.Printf("Updated: %s\n", FormatDateTime(task.UpdatedAt))
+
+	sections = append(sections, newSectionBlock("Timestamps", []string{
+		fmt.Sprintf("Created: %s", FormatDateTime(task.CreatedAt)),
+		fmt.Sprintf("Updated: %s", FormatDateTime(task.UpdatedAt)),
+	}))
+
+	if location != "" {
+		sections = append(sections, newSectionBlock("📍 Location", []string{location}))
+	}
+
+	printSectionedBox(task.Title, sections)
 }
 
 // PrintProjectSummary prints a project summary
 func PrintProjectSummary(project *models.Project) {
 	PrintHeader(project.Name)
-	
+
 	if project.Description != "" {
 		Dim.Println(project.Description)
 	}
-	
+
 	fmt.Println()
-	
+
 	// Statistics
 	counts := project.CountByStatus()
 	total := len(project.GetAllTasks())
-	
+
 	fmt.Printf("📊 Tasks: %d total\n", total)
 	Yellow.Printf("   ⭕ Todo:    %d\n", counts[models.StatusTodo])
 	Cyan.Printf("   🔄 Doing:   %d\n", counts[models.StatusDoing])
 	Green.Printf("   ✅ Done:    %d\n", counts[models.StatusDone])
 	Red.Printf("   🚫 Blocked: %d\n", counts[models.StatusBlocked])
-	
+
 	fmt.Println()
-	
+
 	// Time stats
 	estimated := project.CalculateTotalEstimated()
 	actual := project.CalculateTotalActual()
-	
+
 	fmt.Println("⏱️  Time:")
 	fmt.Printf("   Estimated: %s\n", FormatHours(estimated))
 	fmt.Printf("   Actual:    %s\n", FormatHours(actual))
-	
+
 	if estimated > 0 {
 		variance := actual - estimated
 		if variance > 0 {
-			Red.Printf("   Variance:  +%s (%.1f%% over)\n", 
-				FormatHours(variance), 
+			Red.Printf("   Variance:  +%s (%.1f%% over)\n",
+				FormatHours(variance),
 				(variance/estimated)*100)
 		} else if variance < 0 {
-			Green.Printf("   Variance:  %s (%.1f%% under)\n", 
-				FormatHours(variance), 
+			Green.Printf("   Variance:  %s (%.1f%% under)\n",
+				FormatHours(variance),
 				(-variance/estimated)*100)
 		}
 	}
-	
+
 	fmt.Println()
-	
+
 	// Completion
 	completion := project.GetCompletionPercentage()
 	fmt.Print("📈 Completion: ")
 	PrintProgressBar(completion, 40)
 	fmt.Printf(" %s\n", FormatPercentage(completion))
-	
+
 	fmt.Println()
 	fmt.Printf("📦 Modules: %d\n", len(project.Modules))
 	fmt.Printf("🏃 Sprints: %d\n", len(project.Sprints))
@@ -385,19 +327,19 @@ func PrintProjectSummary(project *models.Project) {
 // PrintModuleSummary prints a module summary
 func PrintModuleSummary(module *models.Module) {
 	PrintSubHeader("📦 " + module.Name)
-	
+
 	if module.Description != "" {
 		Dim.Println("   " + module.Description)
 	}
-	
+
 	fmt.Printf("   Tasks: %d\n", len(module.Tasks))
-	
+
 	// Count by status
 	statusCounts := make(map[models.TaskStatus]int)
 	for _, task := range module.Tasks {
 		statusCounts[task.Status]++
 	}
-	
+
 	if len(module.Tasks) > 0 {
 		done := statusCounts[models.StatusDone]
 		completion := float64(done) / float64(len(module.Tasks)) * 100
@@ -405,6 +347,132 @@ func PrintModuleSummary(module *models.Module) {
 		PrintProgressBar(completion, 30)
 		fmt.Printf(" %s\n", FormatPercentage(completion))
 	}
+}
+
+func buildTaskDetailsSection(task models.Task) []string {
+	statusColor := GetStatusColor(task.Status)
+	priorityColor := GetPriorityColor(task.Priority)
+
+	lines := []string{
+		fmt.Sprintf("ID:          %s", BoldCyan.Sprint(task.ID)),
+		fmt.Sprintf("Status:      %s %s",
+			statusColor.Sprint(GetStatusIcon(task.Status)),
+			statusColor.Sprint(task.Status)),
+		fmt.Sprintf("Priority:    %s %s",
+			priorityColor.Sprint(GetPriorityIcon(task.Priority)),
+			priorityColor.Sprint(task.Priority)),
+	}
+
+	if task.JiraIssue != "" {
+		lines = append(lines, fmt.Sprintf("Jira Issue:  %s", BoldBlue.Sprint(task.JiraIssue)))
+	}
+
+	if task.Description != "" {
+		lines = append(lines, fmt.Sprintf("Description: %s", White.Sprint(task.Description)))
+	}
+
+	return lines
+}
+
+func buildTaskTimeSection(task models.Task) []string {
+	lines := []string{
+		fmt.Sprintf("Estimated:  %s", Cyan.Sprint(FormatHours(task.EstimatedHours))),
+	}
+
+	actual := task.CalculateActualHours()
+	lines = append(lines, fmt.Sprintf("Actual:     %s", Cyan.Sprint(FormatHours(actual))))
+
+	if task.EstimatedHours > 0 {
+		variance := task.GetVariance()
+		varPct := task.GetVariancePercentage()
+
+		if variance > 0 {
+			lines = append(lines, fmt.Sprintf("Variance:   %s",
+				Red.Sprintf("+%s (%.1f%% over)", FormatHours(variance), varPct)))
+		} else if variance < 0 {
+			lines = append(lines, fmt.Sprintf("Variance:   %s",
+				Green.Sprintf("%s (%.1f%% under)", FormatHours(variance), -varPct)))
+		} else {
+			lines = append(lines, Green.Sprint("Variance:   On target"))
+		}
+	}
+
+	return lines
+}
+
+type sectionBlock struct {
+	title   string
+	content []string
+}
+
+func newSectionBlock(title string, content []string) sectionBlock {
+	return sectionBlock{title: title, content: content}
+}
+
+func formatTimeEntries(entries []models.TimeEntry) []string {
+	lines := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		lines = append(lines, fmt.Sprintf("%s: %s",
+			Yellow.Sprint(entry.Date),
+			Cyan.Sprint(FormatHours(entry.Hours))))
+	}
+	return lines
+}
+
+func formatRecurrence(rec *models.Recurrence) []string {
+	lines := []string{
+		fmt.Sprintf("Pattern:    %s", Magenta.Sprint(rec.Type)),
+		fmt.Sprintf("Next Due:   %s", Yellow.Sprint(FormatDate(rec.NextDue))),
+	}
+	if rec.Value != "" {
+		lines[0] = fmt.Sprintf("Pattern:    %s (%s)", Magenta.Sprint(rec.Type), White.Sprint(rec.Value))
+	}
+	if rec.LastCompleted != "" {
+		lines = append(lines, fmt.Sprintf("Last Done:  %s", Yellow.Sprint(FormatDate(rec.LastCompleted))))
+	}
+	return lines
+}
+
+func formatDependencies(ids []string) []string {
+	lines := make([]string, len(ids))
+	for i, dep := range ids {
+		lines[i] = fmt.Sprintf("→ Depends on: %s", Yellow.Sprint(dep))
+	}
+	return lines
+}
+
+func printSectionedBox(title string, sections []sectionBlock) {
+	width := calculateSectionWidth(title, sections)
+	separator := strings.Repeat("═", width)
+
+	BoldBlue.Println(title)
+	Dim.Println(separator)
+	for i, section := range sections {
+		BoldBlue.Println(section.title)
+		for _, line := range section.content {
+			fmt.Printf("  %s\n", line)
+		}
+		if i < len(sections)-1 {
+			Dim.Println(separator)
+		}
+	}
+	Dim.Println(separator)
+	fmt.Println()
+}
+
+func calculateSectionWidth(title string, sections []sectionBlock) int {
+	width := len(title)
+	for _, section := range sections {
+		if len(section.title) > width {
+			width = len(section.title)
+		}
+		for _, line := range section.content {
+			if len(line) > width {
+				width = len(line)
+			}
+		}
+	}
+	return width
 }
 
 // PrintList prints a simple bulleted list

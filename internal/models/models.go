@@ -24,19 +24,20 @@ type Module struct {
 
 // Task represents a work item
 type Task struct {
-	ID             string       `json:"id"`
-	Title          string       `json:"title"`
-	Description    string       `json:"description"`
-	Status         TaskStatus   `json:"status"`
-	Priority       Priority     `json:"priority"`
-	EstimatedHours float64      `json:"estimated_hours"`
-	Tags           []string     `json:"tags"`
-	Dependencies   []string     `json:"dependencies"`
-	ParentID       string       `json:"parent_id,omitempty"`
-	TimeEntries    []TimeEntry  `json:"time_entries"`
-	Recurrence     *Recurrence  `json:"recurrence,omitempty"`
-	CreatedAt      time.Time    `json:"created_at"`
-	UpdatedAt      time.Time    `json:"updated_at"`
+	ID             string      `json:"id"`
+	Title          string      `json:"title"`
+	Description    string      `json:"description"`
+	Status         TaskStatus  `json:"status"`
+	Priority       Priority    `json:"priority"`
+	EstimatedHours float64     `json:"estimated_hours"`
+	Tags           []string    `json:"tags"`
+	Dependencies   []string    `json:"dependencies"`
+	JiraIssue      string      `json:"jira_issue,omitempty"`
+	ParentID       string      `json:"parent_id,omitempty"`
+	TimeEntries    []TimeEntry `json:"time_entries"`
+	Recurrence     *Recurrence `json:"recurrence,omitempty"`
+	CreatedAt      time.Time   `json:"created_at"`
+	UpdatedAt      time.Time   `json:"updated_at"`
 }
 
 // TaskStatus represents the state of a task
@@ -154,11 +155,11 @@ func (t *Task) IsRecurring() bool {
 func (p *Project) GetAllTasks() []Task {
 	tasks := make([]Task, 0, len(p.Tasks))
 	tasks = append(tasks, p.Tasks...)
-	
+
 	for _, module := range p.Modules {
 		tasks = append(tasks, module.Tasks...)
 	}
-	
+
 	return tasks
 }
 
@@ -169,11 +170,11 @@ func (p *Project) CountByStatus() map[TaskStatus]int {
 	counts[StatusDoing] = 0
 	counts[StatusDone] = 0
 	counts[StatusBlocked] = 0
-	
+
 	for _, task := range p.GetAllTasks() {
 		counts[task.Status]++
 	}
-	
+
 	return counts
 }
 
@@ -199,10 +200,10 @@ func (p *Project) CalculateTotalActual() float64 {
 func (p *Project) GetCompletionPercentage() float64 {
 	counts := p.CountByStatus()
 	total := len(p.GetAllTasks())
-	
+
 	if total == 0 {
 		return 0
 	}
-	
+
 	return (float64(counts[StatusDone]) / float64(total)) * 100
 }
