@@ -307,13 +307,19 @@ var moduleEditCmd = &cobra.Command{
 func init() {
 	// module create flags
 	moduleCreateCmd.Flags().StringSliceP("tags", "t", []string{}, "Tags for the module")
+	moduleCreateCmd.ValidArgsFunction = moduleCreateArgCompletion
 
 	// module remove flags
 	moduleRemoveCmd.Flags().BoolP("force", "f", false, "Skip confirmation prompt")
+	moduleRemoveCmd.ValidArgsFunction = modulePathArgCompletion
 
 	// module edit flags
 	moduleEditCmd.Flags().StringP("name", "n", "", "New module name")
 	moduleEditCmd.Flags().StringP("description", "d", "", "New module description")
+	moduleEditCmd.ValidArgsFunction = modulePathArgCompletion
+
+	moduleListCmd.ValidArgsFunction = projectArgCompletion
+	moduleShowCmd.ValidArgsFunction = modulePathArgCompletion
 
 	// Add subcommands
 	moduleCmd.AddCommand(moduleCreateCmd)

@@ -269,6 +269,10 @@ func init() {
 	projectCreateCmd.Flags().StringSliceP("tags", "t", []string{}, "Tags for the project")
 	projectDeleteCmd.Flags().BoolP("force", "f", false, "Skip confirmation prompt")
 
+	projectShowCmd.ValidArgsFunction = projectArgCompletion
+	projectDeleteCmd.ValidArgsFunction = projectArgCompletion
+	projectStatsCmd.ValidArgsFunction = projectArgCompletion
+
 	projectCmd.AddCommand(projectCreateCmd)
 	projectCmd.AddCommand(projectListCmd)
 	projectCmd.AddCommand(projectShowCmd)

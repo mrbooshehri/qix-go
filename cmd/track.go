@@ -583,6 +583,12 @@ func init() {
 	// track log flags
 	trackLogCmd.Flags().StringP("date", "d", "", "Date for time entry (YYYY-MM-DD, defaults to today)")
 
+	trackStartCmd.ValidArgsFunction = trackPathTaskArgCompletion
+	trackLogCmd.ValidArgsFunction = trackPathTaskArgCompletion
+	trackSwitchCmd.ValidArgsFunction = trackPathTaskArgCompletion
+	trackListCmd.ValidArgsFunction = projectArgCompletion
+	trackSummaryCmd.ValidArgsFunction = projectArgCompletion
+
 	// Add subcommands
 	trackCmd.AddCommand(trackStartCmd)
 	trackCmd.AddCommand(trackStopCmd)

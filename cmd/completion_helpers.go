@@ -104,7 +104,7 @@ func completeProjectModulePaths(toComplete string) ([]string, cobra.ShellCompDir
 
 	for _, name := range names {
 		if lowerPrefix == "" || strings.HasPrefix(strings.ToLower(name), lowerPrefix) {
-			matches = append(matches, name)
+			matches = append(matches, escapeCompletion(name))
 		}
 
 		project, err := store.LoadProject(name)
@@ -116,7 +116,7 @@ func completeProjectModulePaths(toComplete string) ([]string, cobra.ShellCompDir
 		for _, module := range project.Modules {
 			path := fmt.Sprintf("%s/%s", name, module.Name)
 			if lowerPrefix == "" || strings.HasPrefix(strings.ToLower(path), lowerPrefix) {
-				matches = append(matches, path)
+				matches = append(matches, escapeCompletion(path))
 			}
 		}
 	}
@@ -147,6 +147,154 @@ func projectTwoTaskArgCompletion(cmd *cobra.Command, args []string, toComplete s
 	case 0:
 		return completeProjectNames(toComplete)
 	case 1, 2:
+		return completeTaskIDs(args[0], toComplete)
+	default:
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
+func moduleCreateArgCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	names, dir := completeProjectNames(toComplete)
+	if dir == cobra.ShellCompDirectiveError {
+		return names, dir
+	}
+
+	matches := make([]string, len(names))
+	for i, name := range names {
+		matches[i] = fmt.Sprintf("%s/", name)
+	}
+
+	return matches, dir | cobra.ShellCompDirectiveNoSpace
+}
+
+func modulePathArgCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return completeModulePaths(toComplete)
+}
+
+func completeModulePaths(toComplete string) ([]string, cobra.ShellCompDirective) {
+	if err := ensureCompletionReady(); err != nil {
+		logging.Errorf("Module completion init failed: %v", err)
+		return nil, cobra.ShellCompDirectiveError
+	}
+
+	store := storage.Get()
+	names, err := store.ListProjects()
+	if err != nil {
+		logging.Errorf("Failed to list projects for module completion: %v", err)
+		return nil, cobra.ShellCompDirectiveError
+	}
+
+	lowerPrefix := strings.ToLower(toComplete)
+	matches := make([]string, 0)
+
+	for _, name := range names {
+		project, err := store.LoadProject(name)
+		if err != nil {
+			logging.Warnf("Unable to load project '%s' for module completion: %v", name, err)
+			continue
+		}
+
+		for _, module := range project.Modules {
+			path := fmt.Sprintf("%s/%s", name, module.Name)
+			if lowerPrefix == "" || strings.HasPrefix(strings.ToLower(path), lowerPrefix) {
+				matches = append(matches, escapeCompletion(path))
+			}
+		}
+	}
+
+	return matches, cobra.ShellCompDirectiveNoFileComp
+}
+
+func projectFromPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	parts := strings.SplitN(path, "/", 2)
+	return parts[0]
+}
+
+func trackPathTaskArgCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	switch len(args) {
+	case 0:
+		return completeProjectModulePaths(toComplete)
+	case 1:
+		projectName := projectFromPath(args[0])
+		if projectName == "" {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return completeTaskIDs(projectName, toComplete)
+	default:
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
+func twoProjectArgCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	switch len(args) {
+	case 0, 1:
+		return completeProjectNames(toComplete)
+	default:
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
+func escapeCompletion(value string) string {
+	if value == "" {
+		return value
+	}
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, " ", `\ `)
+	return value
+}
+
+func completeSprintNames(projectName, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if err := ensureCompletionReady(); err != nil {
+		logging.Errorf("Sprint completion init failed: %v", err)
+		return nil, cobra.ShellCompDirectiveError
+	}
+
+	store := storage.Get()
+	project, err := store.LoadProject(projectName)
+	if err != nil {
+		logging.Warnf("Project '%s' not found during sprint completion: %v", projectName, err)
+		return nil, cobra.ShellCompDirectiveError
+	}
+
+	filter := strings.ToLower(toComplete)
+	matches := make([]string, 0, len(project.Sprints))
+	for _, sprint := range project.Sprints {
+		if filter == "" || strings.HasPrefix(strings.ToLower(sprint.Name), filter) {
+			matches = append(matches, sprint.Name)
+		}
+	}
+
+	return matches, cobra.ShellCompDirectiveNoFileComp
+}
+
+func sprintProjectSprintArgCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	switch len(args) {
+	case 0:
+		return completeProjectNames(toComplete)
+	case 1:
+		return completeSprintNames(args[0], toComplete)
+	default:
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
+func sprintProjectSprintTaskArgCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	switch len(args) {
+	case 0:
+		return completeProjectNames(toComplete)
+	case 1:
+		return completeSprintNames(args[0], toComplete)
+	case 2:
 		return completeTaskIDs(args[0], toComplete)
 	default:
 		return nil, cobra.ShellCompDirectiveNoFileComp
