@@ -3,6 +3,7 @@ package storage
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mrbooshehri/qix-go/internal/models"
@@ -18,12 +19,12 @@ func (s *Storage) LoadTrackingData() (*models.TrackingData, error) {
 			Sessions:      make([]interface{}, 0),
 		}, nil
 	}
-	
+
 	var data models.TrackingData
 	if err := readJSONFile(s.config.TrackFile, &data); err != nil {
 		return nil, fmt.Errorf("failed to load tracking data: %w", err)
 	}
-	
+
 	return &data, nil
 }
 
@@ -38,30 +39,30 @@ func (s *Storage) StartTracking(projectName, moduleName, taskID string) error {
 	if _, _, err := s.FindTask(projectName, taskID); err != nil {
 		return fmt.Errorf("task not found: %w", err)
 	}
-	
+
 	data, err := s.LoadTrackingData()
 	if err != nil {
 		return err
 	}
-	
+
 	// Check for existing session
 	if data.ActiveSession != nil {
 		return fmt.Errorf("active session already exists for task %s", data.ActiveSession.TaskID)
 	}
-	
+
 	// Create path
 	path := projectName
 	if moduleName != "" {
 		path = fmt.Sprintf("%s/%s", projectName, moduleName)
 	}
-	
+
 	// Create new session
 	data.ActiveSession = &models.TrackingSession{
 		Path:      path,
 		TaskID:    taskID,
 		StartTime: time.Now(),
 	}
-	
+
 	return s.SaveTrackingData(data)
 }
 
@@ -71,41 +72,41 @@ func (s *Storage) StopTracking() (time.Duration, string, string, error) {
 	if err != nil {
 		return 0, "", "", err
 	}
-	
+
 	if data.ActiveSession == nil {
 		return 0, "", "", fmt.Errorf("no active tracking session")
 	}
-	
+
 	session := data.ActiveSession
 	elapsed := time.Since(session.StartTime)
 	hours := elapsed.Hours()
-	
-	// Parse path to get project and module
+
+	// Parse path to get project
 	projectName := session.Path
-	// moduleName is extracted but may not be used in simple cases
-	// For project-only paths, moduleName will be empty
-	_ = projectName // Explicitly mark as used for path parsing
-	
+	if parts := strings.SplitN(session.Path, "/", 2); len(parts) > 0 {
+		projectName = parts[0]
+	}
+
 	// Add time entry to task
 	entry := models.TimeEntry{
 		Date:     time.Now().Format("2006-01-02"),
 		Hours:    hours,
 		LoggedAt: time.Now(),
 	}
-	
+
 	if err := s.AddTimeEntry(projectName, session.TaskID, entry); err != nil {
 		return 0, "", "", fmt.Errorf("failed to log time: %w", err)
 	}
-	
+
 	// Clear active session
 	taskID := session.TaskID
 	path := session.Path
 	data.ActiveSession = nil
-	
+
 	if err := s.SaveTrackingData(data); err != nil {
 		return 0, "", "", err
 	}
-	
+
 	return elapsed, path, taskID, nil
 }
 
@@ -115,7 +116,7 @@ func (s *Storage) GetActiveSession() (*models.TrackingSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return data.ActiveSession, nil
 }
 
@@ -125,7 +126,7 @@ func (s *Storage) IsTracking() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	
+
 	return session != nil, nil
 }
 
@@ -135,11 +136,11 @@ func (s *Storage) GetElapsedTime() (time.Duration, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	if session == nil {
 		return 0, fmt.Errorf("no active session")
 	}
-	
+
 	return time.Since(session.StartTime), nil
 }
 
@@ -150,13 +151,13 @@ func (s *Storage) SwitchTracking(projectName, moduleName, taskID string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	if tracking {
 		if _, _, _, err := s.StopTracking(); err != nil {
 			return fmt.Errorf("failed to stop current session: %w", err)
 		}
 	}
-	
+
 	// Start new session
 	return s.StartTracking(projectName, moduleName, taskID)
 }
@@ -167,12 +168,12 @@ func (s *Storage) GetTimeEntriesForDate(date string) (map[string][]models.TimeEn
 	if err != nil {
 		return nil, err
 	}
-	
+
 	entriesByProject := make(map[string][]models.TimeEntry)
-	
+
 	for _, project := range projects {
 		entries := make([]models.TimeEntry, 0)
-		
+
 		for _, task := range project.GetAllTasks() {
 			for _, entry := range task.TimeEntries {
 				if entry.Date == date {
@@ -180,12 +181,12 @@ func (s *Storage) GetTimeEntriesForDate(date string) (map[string][]models.TimeEn
 				}
 			}
 		}
-		
+
 		if len(entries) > 0 {
 			entriesByProject[project.Name] = entries
 		}
 	}
-	
+
 	return entriesByProject, nil
 }
 
@@ -195,9 +196,9 @@ func (s *Storage) GetTimeEntriesInRange(projectName, startDate, endDate string) 
 	if err != nil {
 		return nil, err
 	}
-	
+
 	entries := make([]models.TimeEntry, 0)
-	
+
 	for _, task := range project.GetAllTasks() {
 		for _, entry := range task.TimeEntries {
 			if entry.Date >= startDate && entry.Date <= endDate {
@@ -205,7 +206,7 @@ func (s *Storage) GetTimeEntriesInRange(projectName, startDate, endDate string) 
 			}
 		}
 	}
-	
+
 	return entries, nil
 }
 
@@ -215,13 +216,13 @@ func (s *Storage) CalculateTotalHoursForDate(date string) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	total := 0.0
 	for _, entries := range entriesByProject {
 		for _, entry := range entries {
 			total += entry.Hours
 		}
 	}
-	
+
 	return total, nil
 }
